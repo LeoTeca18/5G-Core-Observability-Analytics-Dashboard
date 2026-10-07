@@ -292,15 +292,15 @@ with col_ts:
     ts_str = datetime.fromisoformat(snapshot["timestamp"].replace("Z", "+00:00")).strftime("%H:%M:%S UTC")
     st.markdown(f"""
     <div style="text-align:right; padding-top:14px;">
-        <span class="ts-badge">⏱ Atualizado: {ts_str}</span>
+        <span class="ts-badge">⏱ Updated: {ts_str}</span>
     </div>""", unsafe_allow_html=True)
 
 # Simulator banner
 if any(v.get("simulated") for v in snapshot["nf_health"].values()):
     st.markdown("""
     <div class="sim-banner">
-        ⚠️ <strong style="color:#ffffff;">Modo Simulador Ativo</strong> — O dashboard está gerando telemetria sintética do 5G Core.
-        Quando os contêineres Docker estiverem em execução, desative o Simulador na barra lateral.
+        ⚠️ <strong style="color:#ffffff;">Simulator Mode Active</strong> — The dashboard is generating synthetic 5G Core telemetry.
+        When the Docker containers are running, disable the Simulator in the sidebar.
     </div>""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -309,10 +309,10 @@ if any(v.get("simulated") for v in snapshot["nf_health"].values()):
 kpis = snapshot["kpis"]
 k1, k2, k3, k4 = st.columns(4)
 kpi_defs = [
-    (k1, "👥", kpis["registered_ues"], "UEs Registrados"),
-    (k2, "🔗", kpis["active_pdu"],     "Sessões PDU Ativas"),
-    (k3, "✅", kpis["nfs_online"],     "NFs Disponíveis"),
-    (k4, "⚡", f"{kpis['avg_latency_ms']} ms", "Latência Média SBI"),
+    (k1, "👥", kpis["registered_ues"], "Registered UEs"),
+    (k2, "🔗", kpis["active_pdu"],     "Active PDU Sessions"),
+    (k3, "✅", kpis["nfs_online"],     "NFs Online"),
+    (k4, "⚡", f"{kpis['avg_latency_ms']} ms", "Avg SBI Latency"),
 ]
 for col, icon, val, label in kpi_defs:
     with col:
@@ -326,7 +326,7 @@ for col, icon, val, label in kpi_defs:
 # ---------------------------------------------------------------------------
 # NF Health Status Grid
 # ---------------------------------------------------------------------------
-st.markdown('<div class="section-header">🏥 Saúde das Funções de Rede (NF Health)</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">🏥 Network Function Health (NF Health)</div>', unsafe_allow_html=True)
 health = snapshot["nf_health"]
 cols = st.columns(len(NF_ORDER))
 for col, nf in zip(cols, NF_ORDER):
@@ -341,7 +341,7 @@ for col, nf in zip(cols, NF_ORDER):
 
     if simulated:
         css_class = "nf-badge-sim"
-        badge_status = "🟡 SIMULADO"
+        badge_status = "🟡 SIMULATED"
         status_color = "#fef08a"
     elif online:
         css_class = "nf-badge-online"
@@ -363,19 +363,19 @@ for col, nf in zip(cols, NF_ORDER):
 # ---------------------------------------------------------------------------
 # Charts Row
 # ---------------------------------------------------------------------------
-st.markdown('<div class="section-header">📈 Telemetria em Tempo Real</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">📈 Real-Time Telemetry</div>', unsafe_allow_html=True)
 
 chart_col1, chart_col2, chart_col3 = st.columns([2, 1, 1])
 
 # — Latency time-series
 with chart_col1:
-    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>Latência das Chamadas SBI (ms)</strong>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>SBI Call Latency (ms)</strong>", unsafe_allow_html=True)
     lat_df = metrics_store.get_all_latency_history()
     if not lat_df.empty:
         lat_df["ts"] = pd.to_datetime(lat_df["ts"])
         fig_lat = px.line(
             lat_df, x="ts", y="latency_ms", color="nf_name",
-            labels={"ts": "Horário", "latency_ms": "Latência (ms)", "nf_name": "Função (NF)"},
+            labels={"ts": "Time", "latency_ms": "Latency (ms)", "nf_name": "Network Function"},
             color_discrete_map={
                 "NRF": "#818cf8", "AMF": "#34d399", "SMF": "#fbbf24",
                 "UPF": "#f87171", "PCF": "#38bdf8", "UDM": "#a3e635",
@@ -391,11 +391,11 @@ with chart_col1:
         )
         st.plotly_chart(fig_lat, use_container_width=True)
     else:
-        st.info("Coletando medições de latência…")
+        st.info("Collecting latency measurements…")
 
 # — UPF throughput gauge
 with chart_col2:
-    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>Throughput UPF (Plano de Usuário)</strong>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>UPF Throughput (User Plane)</strong>", unsafe_allow_html=True)
     upf_data = snapshot["upf"]["data"]
     dl_mbps  = upf_data.get("upf_throughput_dl_mbps", 0)
     ul_mbps  = upf_data.get("upf_throughput_ul_mbps", 0)
@@ -427,7 +427,7 @@ with chart_col2:
 
 # — PDU session donut
 with chart_col3:
-    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>Sessões PDU por DNN</strong>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#f8fafc; font-size:1rem;'>PDU Sessions by DNN</strong>", unsafe_allow_html=True)
     pdu_data = snapshot["smf"]["data"]
     if pdu_data:
         df_pdu = pd.DataFrame(pdu_data)
