@@ -1,0 +1,185 @@
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MongoDB — persistent store for subscriber data (Open5GS backend)
+  # ─────────────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:6.0
+    container_name: open5gs-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - 5gcore
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Open5GS Web UI — subscriber management + northbound REST API
+  # Exposes: http://localhost:3000  (API: /api/v1/subscribers)
+  # ─────────────────────────────────────────────────────────────────────────
+  open5gs-webui:
+    image: gradiant/open5gs-webui:2.7.0
+    container_name: open5gs-webui
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - DB_URI=mongodb://mongodb/open5gs
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    networks:
+      - 5gcore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NRF — Network Repository Function (3GPP TS 29.510)
+  # Exposes SBI at: http://localhost:7777
+  # ─────────────────────────────────────────────────────────────────────────
+  nrf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-nrf
+    command: open5gs-nrfd -c /opt/open5gs/etc/open5gs/nrf.yaml
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    networks:
+      - 5gcore
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # AMF — Access and Mobility Management Function (3GPP TS 29.518)
+  # Exposes SBI at: http://localhost:7779
+  # ─────────────────────────────────────────────────────────────────────────
+  amf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-amf
+    command: open5gs-amfd -c /opt/open5gs/etc/open5gs/amf.yaml
+    restart: unless-stopped
+    ports:
+      - "7779:7779"
+      - "38412:38412/sctp"   # N2 (NG-AP interface to gNB)
+    networks:
+      - 5gcore
+    depends_on:
+      - nrf
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SMF — Session Management Function (3GPP TS 29.502)
+  # Exposes SBI at: http://localhost:7780
+  # ─────────────────────────────────────────────────────────────────────────
+  smf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-smf
+    command: open5gs-smfd -c /opt/open5gs/etc/open5gs/smf.yaml
+    restart: unless-stopped
+    ports:
+      - "7780:7780"
+      - "8805:8805/udp"    # N4 PFCP interface to UPF
+    networks:
+      - 5gcore
+    depends_on:
+      - nrf
+      - amf
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # UPF — User Plane Function (3GPP TS 29.244 / PFCP)
+  # Prometheus metrics at: http://localhost:9090/metrics
+  # ─────────────────────────────────────────────────────────────────────────
+  upf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-upf
+    command: open5gs-upfd -c /opt/open5gs/etc/open5gs/upf.yaml
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "2152:2152/udp"   # N3 GTP-U tunnel (from gNB)
+      - "9090:9090"       # Prometheus metrics exposition
+    cap_add:
+      - NET_ADMIN          # required for TUN interface creation
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - 5gcore
+    depends_on:
+      - smf
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PCF — Policy Control Function (3GPP TS 29.244)
+  # ─────────────────────────────────────────────────────────────────────────
+  pcf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-pcf
+    command: open5gs-pcfd -c /opt/open5gs/etc/open5gs/pcf.yaml
+    restart: unless-stopped
+    ports:
+      - "7781:7781"
+    networks:
+      - 5gcore
+    depends_on:
+      - nrf
+      - mongodb
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # UDM — Unified Data Management (3GPP TS 29.503)
+  # ─────────────────────────────────────────────────────────────────────────
+  udm:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-udm
+    command: open5gs-udmd -c /opt/open5gs/etc/open5gs/udm.yaml
+    restart: unless-stopped
+    ports:
+      - "7782:7782"
+    networks:
+      - 5gcore
+    depends_on:
+      - nrf
+      - mongodb
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # AUSF — Authentication Server Function (3GPP TS 29.509)
+  # ─────────────────────────────────────────────────────────────────────────
+  ausf:
+    image: gradiant/open5gs:2.7.0
+    container_name: open5gs-ausf
+    command: open5gs-ausfd -c /opt/open5gs/etc/open5gs/ausf.yaml
+    restart: unless-stopped
+    networks:
+      - 5gcore
+    depends_on:
+      - nrf
+      - udm
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Prometheus — metrics aggregation (optional but recommended)
+  # Access at: http://localhost:9091
+  # ─────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+    networks:
+      - 5gcore
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+
+networks:
+  5gcore:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24
+
+volumes:
+  mongodb_data:
