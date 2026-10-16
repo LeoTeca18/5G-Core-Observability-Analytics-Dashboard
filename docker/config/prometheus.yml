@@ -1,16 +1,22 @@
-﻿# Prometheus scrape configuration for 5G Core containers
+# Prometheus scrape configuration for the Open5GS 5G Core containers
 # Reference: https://prometheus.io/docs/prometheus/latest/configuration/
+# Open5GS exposes Prometheus metrics on port 9090 of AMF, SMF, UPF and PCF.
 
 global:
   scrape_interval: 5s
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: upf
+  - job_name: open5gs
     static_configs:
+      - targets: ["amf:9090"]
+        labels: { nf: AMF }
+      - targets: ["smf:9090"]
+        labels: { nf: SMF }
       - targets: ["upf:9090"]
-        labels:
-          nf: UPF
+        labels: { nf: UPF }
+      - targets: ["pcf:9090"]
+        labels: { nf: PCF }
 
   - job_name: prometheus
     static_configs:

@@ -1,0 +1,20 @@
+# UERANSIM gNB — connects to the Open5GS AMF over N2 (NGAP/SCTP) and to the UPF over N3 (GTP-U)
+mcc: '999'
+mnc: '70'
+
+nci: '0x000000010'   # NR Cell Identity (36 bits)
+idLength: 32         # gNB ID length in bits
+tac: 1
+
+linkIp: 172.25.0.210  # radio link simulation (UE <-> gNB)
+ngapIp: 172.25.0.210  # N2
+gtpIp: 172.25.0.210   # N3
+
+amfConfigs:
+  - address: 172.25.0.200
+    port: 38412
+
+slices:
+  - sst: 1
+
+ignoreStreamIds: true
