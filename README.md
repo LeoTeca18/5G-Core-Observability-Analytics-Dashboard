@@ -1,9 +1,5 @@
 # 5G Core Observability and Analytics Dashboard
 
-> **Graduate Program in Applied Computing (PPGCA) — UNISINOS**  
-> Mobile Computing Systems Development · Prof. Dr. Cristiano Bonato Both  
-> Student: Leo Teca
-
 A real-time observability, telemetry, and health monitoring dashboard for 5G Standalone Core networks (5G SA Core), built on the 3GPP Release 16 Service-Based Architecture (SBA), HTTP/2 Service-Based Interfaces (SBI), and Prometheus exposition standards.
 
 ---
@@ -152,4 +148,4 @@ pytest tests/ -v -k "not integration"
 
 ## 📄 License
 
-Academic project developed for the Graduate Program in Applied Computing (PPGCA), UNISINOS, 2024. All rights reserved.
+Academic project developed for the Graduate Program in Applied Computing (PPGCA), UNISINOS, 2026. All rights reserved.
