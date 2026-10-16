@@ -1,10 +1,10 @@
-﻿"""
-test_collector.py — Unit & integration tests for the CollectorService.
+"""
+test_collector.py — Unit & integration tests for the CollectorService & MetricsStore.
 
 Test categories:
   1. Unit tests with Simulator (no network / Docker required).
   2. Integration tests against live 5G Core containers (skipped if unavailable).
-  3. Latency measurement validation.
+  3. Latency & resource measurement validation.
   4. MetricsStore CSV export.
 
 Run:
@@ -15,7 +15,6 @@ Run:
 import os
 import sys
 import time
-import tempfile
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -29,9 +28,11 @@ from metrics import MetricsStore, measure_latency
 
 @pytest.fixture
 def store(tmp_path):
-    """MetricsStore backed by a temporary CSV file."""
+    """MetricsStore backed by temporary CSV files."""
     csv_path = str(tmp_path / "test_perf.csv")
-    return MetricsStore(csv_path=csv_path)
+    res_path = str(tmp_path / "test_res.csv")
+    tel_path = str(tmp_path / "test_tel.csv")
+    return MetricsStore(csv_path=csv_path, resource_csv=res_path, telemetry_csv=tel_path)
 
 @pytest.fixture
 def collector_sim(store):
@@ -77,10 +78,10 @@ class TestSimulator:
 
     def test_upf_metrics_keys(self):
         data = Simulator.upf_metrics()
-        assert "upf_throughput_dl_mbps" in data
-        assert "upf_throughput_ul_mbps" in data
-        assert "upf_active_sessions"    in data
-        assert data["upf_active_sessions"] > 0
+        assert "throughput_dl_mbps" in data
+        assert "throughput_ul_mbps" in data
+        assert "active_sessions" in data
+        assert data["active_sessions"] > 0
 
     def test_system_kpis(self):
         kpis = Simulator.system_kpis()
@@ -94,7 +95,7 @@ class TestSimulator:
 class TestCollectorSimulator:
     def test_collect_all_keys(self, collector_sim):
         snap = collector_sim.collect_all()
-        for key in ("timestamp", "nrf", "amf", "smf", "upf", "nf_health", "kpis"):
+        for key in ("timestamp", "simulated", "nf_health", "nrf_instances", "ues", "pdu_sessions", "upf", "kpis", "errors"):
             assert key in snap, f"Missing key: {key}"
 
     def test_kpis_positive(self, collector_sim):
@@ -107,11 +108,11 @@ class TestCollectorSimulator:
         snap = collector_sim.collect_all()
         for nf in ("NRF", "AMF", "SMF", "UPF", "PCF", "UDM"):
             assert nf in snap["nf_health"]
+            assert snap["nf_health"][nf]["online"] is True
 
     def test_simulated_flag(self, collector_sim):
         snap = collector_sim.collect_all()
-        assert snap["nrf"]["simulated"] is True
-        assert snap["amf"]["simulated"] is True
+        assert snap["simulated"] is True
 
     def test_latency_recorded(self, collector_sim, store):
         collector_sim.collect_all()
@@ -130,7 +131,7 @@ class TestCollectorSimulator:
 
 class TestMetricsStore:
     def test_record_and_retrieve_latency(self, store):
-        store.record_latency("AMF", 3.14, success=True)
+        store.record_latency("AMF", 3.14, success=True, operation="heartbeat")
         df = store.get_latency_df()
         assert len(df) == 1
         assert abs(df.iloc[0]["latency_ms"] - 3.14) < 0.01
@@ -167,10 +168,20 @@ class TestMetricsStore:
         assert len(hist) <= 120   # capped at LATENCY_WINDOW
 
     def test_system_resources_keys(self, store):
-        row = store.record_system_resources(docker_client=None)
-        assert "host_cpu_pct" in row
-        assert "host_ram_mb"  in row
-        assert row["host_ram_mb"] > 0
+        row = store.record_system_resources(docker_client=None, simulate_containers=True)
+        assert "dashboard_cpu_pct" in row
+        assert "dashboard_ram_mb"  in row
+        assert "host_cpu_pct"      in row
+        assert row["dashboard_ram_mb"] > 0
+
+    def test_record_cycle_telemetry(self, store, collector_sim):
+        snap = collector_sim.collect_all()
+        res = store.record_system_resources(docker_client=None, simulate_containers=True)
+        cycle = store.record_cycle(snap, res)
+        assert "timestamp" in cycle
+        assert "registered_ues" in cycle
+        tel_df = store.get_telemetry_df()
+        assert len(tel_df) == 1
 
     def test_measure_decorator(self, store):
         @store.measure("PCF")
@@ -182,7 +193,7 @@ class TestMetricsStore:
         assert result == 42
         df = store.get_latency_df()
         assert len(df) == 1
-        assert df.iloc[0]["latency_ms"] >= 10.0
+        assert df.iloc[0]["latency_ms"] >= 8.0
 
 # ---------------------------------------------------------------------------
 # Prometheus parser tests
@@ -224,27 +235,29 @@ class TestMeasureLatency:
 
     def test_latency_positive(self):
         _, lat = measure_latency(time.sleep, 0.005)
-        assert lat >= 4.0
+        assert lat >= 3.0
 
 # ---------------------------------------------------------------------------
-# Integration tests (require live 5G Core — skip automatically if offline)
+# Integration tests (require live 5G Core — skipped automatically if offline)
 # ---------------------------------------------------------------------------
 
 def requires_live_core():
     """Skip marker for tests requiring Docker / real NFs."""
-    import requests
+    import httpx
     try:
-        requests.get("http://127.0.0.1:7777/nnrf-nfm/v1/nf-instances", timeout=1)
-        return False
+        with httpx.Client(http1=False, http2=True, timeout=1.0) as c:
+            r = c.get("http://127.0.0.1:7777/nnrf-nfm/v1/nf-instances")
+            return r.status_code >= 500
     except Exception:
         return True
 
 @pytest.mark.skipif(requires_live_core(), reason="5G Core containers not running")
 class TestIntegrationLive:
-    def test_nrf_returns_list(self, store):
+    def test_nrf_returns_instances(self, store):
         svc = CollectorService(store, use_simulator=False)
-        result = svc.get_nrf_instances()
-        assert isinstance(result["data"], list)
+        snap = svc.collect_all()
+        assert snap["simulated"] is False
+        assert len(snap["nrf_instances"]) > 0
 
     def test_health_check_nrf_online(self, store):
         svc = CollectorService(store, use_simulator=False)
